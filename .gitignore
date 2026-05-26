@@ -10,3 +10,6 @@ __pycache__/
 
 # datasets and model output
 data/
+
+# vscode
+.vscode/

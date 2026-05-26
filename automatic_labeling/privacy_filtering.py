@@ -4,6 +4,7 @@
 # using the grounded DINO local model
 
 import os
+from urllib import response
 import cv2
 import numpy as np
 import supervision as sv
@@ -16,6 +17,8 @@ from sam2.sam2_image_predictor import Sam2ImagePredictor
 from grounding_dino.groundingdino.util.inference import load_model, load_image, predict
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
+from ollama import chat
+from pydantic import BaseModel, Field, field_validator
 
 ###
 # Hyper Params #
@@ -24,7 +27,8 @@ GROUNDING_DINO_CHECKPOINT = "gdino_checkpoints/groundingdino_swint_ogc.pth"
 BOX_THRESHOLD = 0.35
 TEXT_THRESHOLD = 0.25
 VIDEO_PATH = "./assets/hippopotamus.mp4"
-LABEL_PROMPT = "hippopotamus." # MUST be in this format with dot at end
+#LABEL_PROMPT = "" # MUST be in this format with dot at end # change for list for multiple obj remove
+#TEXT_PROMPT = "Filter out the wallet from the video.
 OUTPUT_VIDEO_PATH = "./hippopotamus_tracking_demo.mp4"
 SOURCE_VIDEO_FRAME_DIR = "./custom_video_frames"
 SAVE_TRACKING_RESULTS_DIR = "./tracking_results"
@@ -77,6 +81,44 @@ frame_names.sort(key=lambda p: int(os.path.splitext(p)[0])) # sort the frame nam
 inference_state = video_predictor.init_state(video_path=VIDEO_PATH) # intialize the video predictor's memory state for tracking objs
 ann_frame_idx = 0 # the frame index to make initial mask
 
+
+
+
+
+### Extracting the object label from the text prompt using Ollama and structuring it with pydantic for Grounding DINO ###
+
+# text prompt input
+text = input("Write prompt to filter out something from the video: ") # Ex: Filter out wallet from the room video.
+
+TEXT_PROMPT = text # text prompt
+
+# change this in future to extract multiple labels
+class VideoFilterLabel(BaseModel):
+    """Pydantic model to structure the response from the LLM for video object labels to filter.
+    """
+    object_label: str = Field(description="The exact name of the object to filter or remove from the video.")
+    
+    
+    # validator to make ground_dino format (lowercase with period)
+    @field_validator('object_label')
+    @classmethod
+    def format_obj_labels(cls, value:str) -> str:
+        formatted_label = value.strip().lower().rstrip('.')
+        return f"{formatted_label}."
+
+# generate reponse in json schema format
+response = chat(
+model='gemma3',
+messages=[{'role': 'user', 'content': TEXT_PROMPT}],
+format = VideoFilterLabel.model_json_schema() # Use pydantic schema
+)
+
+# validate and parse the response to get the object label in the correct format for grounding dino
+validated_output = VideoFilterLabel.model_validate_json(response.message.content) # put in validation format
+
+print(validated_output.model_dump_json(indent=2))
+
+LABEL_PROMPT = validated_output.object_label  # label output
 
 
 
@@ -159,7 +201,7 @@ elif PROMPT_TYPE_FOR_VIDEO == "box":
     for object_id, (label, box) in enumerate(zip(OBJECTS, input_boxes), start=1):
         _, out_obj_ids, out_mask_logits = video_predictor.add_new_points_or_box(
             inference_state=inference_state, 
-            frame_idx=ann_frame_idx
+            frame_idx=ann_frame_idx,
             obj_id=object_id, 
             box=box 
         )
