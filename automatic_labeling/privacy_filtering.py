@@ -8,12 +8,13 @@ from urllib import response
 import cv2
 import numpy as np
 import supervision as sv
+import torch
 from torchvision.ops import box_convert
 from pathlib import Path
 from tqdm import tqdm
 from PIL import Image
 from sam2.build_sam import build_sam2_video_predictor, build_sam2
-from sam2.sam2_image_predictor import Sam2ImagePredictor
+from sam2.sam2_image_predictor import SAM2ImagePredictor
 from grounding_dino.groundingdino.util.inference import load_model, load_image, predict
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
@@ -22,16 +23,16 @@ from pydantic import BaseModel, Field, field_validator
 
 ###
 # Hyper Params #
-GROUNDING_DINO_CONFIG = "grounding_dino/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-GROUNDING_DINO_CHECKPOINT = "gdino_checkpoints/groundingdino_swint_ogc.pth"
+GROUNDING_DINO_CONFIG = "automatic_labeling/grounding_dino/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+GROUNDING_DINO_CHECKPOINT = "automatic_labeling/grounding_dino/checkpoint/groundingdino_swint_ogc.pth"
 BOX_THRESHOLD = 0.35
 TEXT_THRESHOLD = 0.25
-VIDEO_PATH = "./assets/hippopotamus.mp4"
+VIDEO_PATH = "../data/table_video.mp4"
 #LABEL_PROMPT = "" # MUST be in this format with dot at end # change for list for multiple obj remove
 #TEXT_PROMPT = "Filter out the wallet from the video.
-OUTPUT_VIDEO_PATH = "./hippopotamus_tracking_demo.mp4"
-SOURCE_VIDEO_FRAME_DIR = "./custom_video_frames"
-SAVE_TRACKING_RESULTS_DIR = "./tracking_results"
+OUTPUT_VIDEO_PATH = "../data/table_video_tracked.mp4"
+SOURCE_VIDEO_FRAME_DIR = "../data/table_video_frames"
+SAVE_TRACKING_RESULTS_DIR = "../data/table_video_results"
 PROMPT_TYPE_FOR_VIDEO = "box" # choose from ["point", "box", "mask"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ###
