@@ -28,6 +28,7 @@ from torch.nn.init import constant_, xavier_uniform_
 try:
     from grounding_dino.groundingdino import _C
 except:
+    _C = None
     warnings.warn("Failed to load custom C++ ops. Running on CPU mode Only!")
 
 
@@ -70,6 +71,10 @@ class MultiScaleDeformableAttnFunction(Function):
     @staticmethod
     @once_differentiable
     def backward(ctx, grad_output):
+        if _C is None:
+            raise RuntimeError(
+                "MultiScaleDeformableAttention backward requires the compiled GroundingDINO C++ ops."
+            )
         (
             value,
             value_spatial_shapes,
@@ -327,7 +332,7 @@ class MultiScaleDeformableAttention(nn.Module):
                 )
             )
     
-        if torch.cuda.is_available() and value.is_cuda:
+        if _C is not None and torch.cuda.is_available() and value.is_cuda:
             halffloat = False
             if value.dtype == torch.float16:
                 halffloat = True

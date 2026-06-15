@@ -1,12 +1,17 @@
 # cache files
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+*.log
 
 # weight checkpoints
 *.pt
 *.pth
 *.ckpt
-1_automatic_labeling/checkpoints/
 
 # datasets and model output
 data/
@@ -14,3 +19,5 @@ data/
 # vscode
 .vscode/
 .venv/
+
+

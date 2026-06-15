@@ -21,22 +21,26 @@ from utils.video_utils import create_video_from_images
 from ollama import chat
 from pydantic import BaseModel, Field, field_validator
 
+# path to data folder
+current_dir = Path(__file__).parent
+data_path = current_dir.parent / "data"
+
 ###
 # Hyper Params #
 GROUNDING_DINO_CONFIG = "automatic_labeling/grounding_dino/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-GROUNDING_DINO_CHECKPOINT = "automatic_labeling/grounding_dino/checkpoint/groundingdino_swint_ogc.pth"
+GROUNDING_DINO_CHECKPOINT = "automatic_labeling/gdino_checkpoints/groundingdino_swint_ogc.pth"
 BOX_THRESHOLD = 0.35
 TEXT_THRESHOLD = 0.25
-VIDEO_PATH = "../data/table_video.mp4"
+VIDEO_PATH = str(data_path / "table_video.mp4") # must be mp4 for sv.VideoInfo to read the video info correctly 
 #LABEL_PROMPT = "" # MUST be in this format with dot at end # change for list for multiple obj remove
-#TEXT_PROMPT = "Filter out the wallet from the video.
-OUTPUT_VIDEO_PATH = "../data/table_video_tracked.mp4"
-SOURCE_VIDEO_FRAME_DIR = "../data/table_video_frames"
-SAVE_TRACKING_RESULTS_DIR = "../data/table_video_results"
+#TEXT_PROMPT = "Filter out the wallet from the video."
+OUTPUT_VIDEO_PATH = str(data_path / "table_video_tracked.mp4")
+SOURCE_VIDEO_FRAME_DIR = str(data_path / "table_video_frames")
+SAVE_TRACKING_RESULTS_DIR = str(data_path / "table_video_results")
 PROMPT_TYPE_FOR_VIDEO = "box" # choose from ["point", "box", "mask"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ###
-
+print(DEVICE)
 
 
 
@@ -47,11 +51,13 @@ grounding_model = load_model(
     model_config_path=GROUNDING_DINO_CONFIG,
     model_checkpoint_path = GROUNDING_DINO_CHECKPOINT,
     device = DEVICE
-)
+).to(DEVICE)
+
+print("Grounding DINO device: ", next(grounding_model.parameters()).device)
 
 # init sam image predictor and video predictor model
-sam2_checkpoint = "./checkpoints/sam2.1_hiera_large.pt"
-model_cfg = "configs/sam2.1/sam2.1_hiera_1.yaml"
+sam2_checkpoint = "automatic_labeling/checkpoints/sam2.1_hiera_large.pt"
+model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
 video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint) # allows tracking -- the spatio-temporal memory bank to track the objects in video
 sam2_image_model = build_sam2(model_cfg, sam2_checkpoint) # loads nn structure
@@ -60,15 +66,16 @@ image_predictor = SAM2ImagePredictor(sam2_image_model) # locates object within s
 # video stream information
 video_info = sv.VideoInfo.from_video_path(VIDEO_PATH)
 print(video_info)
-frame_generator = sv.get_video_frames_generator # frame generator func to read video frames one by one without loading entire video into memory
+frame_generator = sv.get_video_frames_generator(VIDEO_PATH) # frame generator func to read video frames one by one without loading entire video into memory
 
 # saving video to img frames
 source_frames = Path(SOURCE_VIDEO_FRAME_DIR)
 source_frames.mkdir(parents=True, exist_ok=True)
 
-with sv.ImageSink(target_dir_path=source_frames, overwrite=True, image_name_pattern="{:05d}.jpg") as sink:
-    for frame in tdm(frame_generator, desc="Saving Video Frames..."):
-        sink.save_image(frame)
+with sv.ImageSink(target_dir_path=source_frames, overwrite=True, image_name_pattern="{:05d}.jpg" # MUST BE JPEG TO LOAD FRAMES
+                ) as sink:
+                    for frame in tqdm(frame_generator, desc="Saving Video Frames..."): # progress bar for saving frames
+                        sink.save_image(frame)
 
 # scan all the JPEG frame names in this directory 
 frame_names = [
@@ -79,7 +86,7 @@ frame_names = [
 frame_names.sort(key=lambda p: int(os.path.splitext(p)[0])) # sort the frame names in ascending order
 
 # init video predictor state
-inference_state = video_predictor.init_state(video_path=VIDEO_PATH) # intialize the video predictor's memory state for tracking objs
+inference_state = video_predictor.init_state(video_path=SOURCE_VIDEO_FRAME_DIR, offload_video_to_cpu=True) # intialize the video predictor's memory state for tracking objs
 ann_frame_idx = 0 # the frame index to make initial mask
 
 
@@ -153,20 +160,19 @@ image_predictor.set_image(image_source) # set the image for sam predictor
 OBJECTS = class_names
 print(OBJECTS)
 
-# speed up inference with autocast
-torch.autocast(device=DEVICE, dtype=torch.float16).__enter__()
 
 if torch.cuda.get_device_properties(0).major >= 8:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
 # prompt SAM 2 image predictor to get the mask for the object
-masks, score, logits = image_predictor.predict( # all masks for all objects FOR FRAME 0
-    point_coords=None, 
-    point_labels=None, 
-    box=input_boxes,
-    multimask_output=False,
-)
+with torch.autocast(device=DEVICE, dtype=torch.float16): # speed up inference with autocast
+    masks, score, logits = image_predictor.predict( # all masks for all objects FOR FRAME 0
+        point_coords=None, 
+        point_labels=None, 
+        box=input_boxes,
+        multimask_output=False,
+    )
 
 # convert the mask shape to (n, H, W))
 if masks.ndim == 4:
